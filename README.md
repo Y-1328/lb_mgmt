@@ -1,0 +1,286 @@
+
+1. User (Student/Member)
+The primary consumer of the library resources.
+
+Attributes (Model): userId, email, passwordHash, department, searchHistory (List of SearchQuery), issueHistory (List of IssueRecord).
+
+Functions (Controller Access):
+POST /api/auth/login & register: Access to the system.
+GET /api/search: Query the book database.
+GET /api/user/analytics: View their own immutable search history.
+GET /api/archive/stream: Access and read PDF/EPUB resources.
+POST /api/issue/request: Initiate a hold on a physical book.
+
+2. Faculty (Department Admin)
+A specialized user with content-contribution privileges.
+
+Attributes (Model): All User attributes + employeeCode, departmentResourceArchive (List of PDF metadata), deptAnalytics.
+
+Functions (Controller Access):
+All User Permissions.
+POST /api/faculty/upload: Upload academic notes/PDFs (restricted to .pdf, .epub, .docx).
+
+3. Librarian (Inventory Admin)
+The gatekeeper of physical and digital inventory.
+
+Attributes (Model): staffId, staffCode, inventoryLog, pendingApprovals.
+
+Functions (Controller Access):
+POST /api/external/sync: Trigger Open Library/Google Books API to auto-populate book metadata.
+POST /api/books/manual-entry: Manually add books to the catalog.
+PUT /api/issue/confirm: Transition a book status from "Requested" to "Issued".
+POST /api/fines/manage: Calculate and waive/collect fines.
+
+Super Admin (System Owner)
+The highest authority for system integrity and user management.
+Attributes (Model): adminId, masterKey, systemAuditLogs.
+
+Functions (Controller Access):
+Full CRUD on Users: GET, POST, PUT, DELETE on the user table.
+PATCH /api/admin/escalate: Change a User’s role (e.g., Student to Faculty).
+GET /api/admin/audit: View SystemAuditLogs for security tracking.
+POST /api/admin/db-maintenance: Trigger backups or index cleaning.
+
+
+
+To integrate both the Open Library API and the Google Books API into your Spring Boot MVC structure, you need a robust External Service Layer. This layer will handle the differing JSON structures of both APIs and map them to a unified BookResponse DTO for your frontend.
+
+Below is the implementation strategy, including the specific attributes and the service logic required to manage both sources.
+
+1. The Service Architecture (Model/Service)
+You will use an interface-driven approach. This allows the SearchController to remain agnostic of which API is being called.
+
+ExternalBookService (Interface): Defines searchByIsbn(String isbn) and searchByQuery(String query).
+
+OpenLibraryServiceImpl: Implements logic for openlibrary.org/api/volumes.
+
+GoogleBooksServiceImpl: Implements logic for googleapis.com/books/v1/volumes.
+
+2. Implementation of the API Clients
+A. Open Library Integration
+Endpoint: https://openlibrary.org/search.json?q={query}
+Key Attributes to Map:
+
+title: The book's name.
+
+author_name: Array of authors.
+
+isbn: Array of identifiers (crucial for your IssueRecord).
+
+cover_i: Cover ID (used to construct the image URL: https://covers.openlibrary.org/b/id/{id}-L.jpg).
+
+B. Google Books Integration (Secondary/Backup)
+Endpoint: https://www.googleapis.com/books/v1/volumes?q={query}
+Key Attributes to Map:
+
+volumeInfo.title
+
+volumeInfo.authors
+
+volumeInfo.description: Usually more detailed than Open Library.
+
+volumeInfo.imageLinks.thumbnail
+
+
+backend/
+├── 📄 pom.xml                        # Dependencies: Spring Web, JPA, Security, MySQL, Validation
+├── 📄 Dockerfile                     # Multi-stage build (JDK 17/21)
+├── 📄 .env.example                   # Template for DB_URL, JWT_SECRET, API_KEYS
+├── src/
+│   ├── main/
+│   │   ├── java/com/lms/
+│   │   │   ├── 📄 LibraryApplication.java
+│   │   │   ├── 📁 config/            # Infrastructure Configuration
+│   │   │   │   ├── 📄 SecurityConfig.java      # FilterChain & Role hierarchy
+│   │   │   │   ├── 📄 CorsConfig.java          # Cross-Origin settings
+│   │   │   │   ├── 📄 OpenApiConfig.java        # Swagger/UI configuration
+│   │   │   │   ├── 📄 FileUploadConfig.java    # Storage limits & path mapping
+│   │   │   ├── 📁 security/          # Authentication Logic
+│   │   │   │   ├── 📄 JwtConfig.java           # @ConfigurationProperties
+│   │   │   │   ├── 📄 JwtTokenProvider.java    # Token generation/validation
+│   │   │   │   ├── 📄 JwtAuthFilter.java       # OncePerRequestFilter implementation
+│   │   │   │   └── 📄 CustomUserDetailsService.java
+│   │   │   ├── 📁 controller/        # REST Endpoints (Role-specific)
+│   │   │   │   ├── 📄 AuthController.java      # Login/Reg
+│   │   │   │   ├── 📄 SearchController.java    # GET /api/search
+│   │   │   │   ├── 📄 UserAnalyticsController.java
+│   │   │   │   ├── 📄 ExternalSyncController.java
+│   │   │   │   ├── 📄 FacultyUploadController.java
+│   │   │   │   ├── 📄 ArchiveStreamController.java
+│   │   │   │   ├── 📄 IssueController.java
+│   │   │   │   ├── 📄 LibrarianController.java
+│   │   │   │   └── 📄 AdminController.java
+│   │   │   ├── 📁 service/           # Interfaces & Logic
+│   │   │   │   ├── 📁 impl/
+│   │   │   │   │   ├── 📄 AuthServiceImpl.java
+│   │   │   │   │   ├── 📄 SearchServiceImpl.java
+│   │   │   │   │   ├── 📄 AnalyticsServiceImpl.java
+│   │   │   │   │   ├── 📄 ExternalBookServiceImpl.java
+│   │   │   │   │   ├── 📄 GoogleBooksServiceImpl.java
+│   │   │   │   │   ├── 📄 FileStorageServiceImpl.java
+│   │   │   │   │   ├── 📄 IssueServiceImpl.java
+│   │   │   │   │   ├── 📄 FineServiceImpl.java
+│   │   │   │   │   └── 📄 UserManagementServiceImpl.java
+│   │   │   │   ├── 📄 AuthService.java
+│   │   │   │   ├── 📄 SearchService.java
+│   │   │   │   ├── 📄 AnalyticsService.java
+│   │   │   │   ├── 📄 ExternalBookService.java
+│   │   │   │   ├── 📄 FileStorageService.java
+│   │   │   │   ├── 📄 IssueService.java
+│   │   │   │   ├── 📄 FineService.java
+│   │   │   │   └── 📄 UserManagementService.java
+│   │   │   ├── 📁 repository/        # Data Access Layer
+│   │   │   │   ├── 📄 UserRepository.java
+│   │   │   │   ├── 📄 BookRepository.java
+│   │   │   │   ├── 📄 SearchQueryRepository.java # Read-only methods
+│   │   │   │   ├── 📄 IssueRecordRepository.java
+│   │   │   │   ├── 📄 ResourceArchiveRepository.java
+│   │   │   │   ├── 📄 FineRepository.java
+│   │   │   │   └── 📄 AuditLogRepository.java
+│   │   │   ├── 📁 model/             # Entities, DTOs & Constants
+│   │   │   │   ├── 📁 entity/
+│   │   │   │   │   ├── 📄 User.java           # @Inheritance(strategy = InheritanceType.JOINED)
+│   │   │   │   │   ├── 📄 Faculty.java        # Extends User
+│   │   │   │   │   ├── 📄 Librarian.java      # Extends User
+│   │   │   │   │   ├── 📄 SuperAdmin.java     # Extends User
+│   │   │   │   │   ├── 📄 Book.java
+│   │   │   │   │   ├── 📄 SearchQuery.java    # @Immutable
+│   │   │   │   │   ├── 📄 IssueRecord.java
+│   │   │   │   │   ├── 📄 ResourceArchive.java
+│   │   │   │   │   ├── 📄 Fine.java
+│   │   │   │   │   └── 📄 AuditLog.java
+│   │   │   │   ├── 📁 enums/
+│   │   │   │   │   ├── 📄 Role.java
+│   │   │   │   │   ├── 📄 IssueStatus.java
+│   │   │   │   │   └── 📄 FineStatus.java
+│   │   │   │   ├── 📁 dto/
+│   │   │   │   │   ├── 📁 request/
+│   │   │   │   │   │   ├── 📄 RegisterRequest.java
+│   │   │   │   │   │   ├── 📄 LoginRequest.java
+│   │   │   │   │   │   ├── 📄 IssueRequest.java
+│   │   │   │   │   │   ├── 📄 IssueConfirmRequest.java
+│   │   │   │   │   │   ├── 📄 ExternalSyncRequest.java
+│   │   │   │   │   │   └── 📄 RoleEscalationRequest.java
+│   │   │   │   │   └── 📁 response/
+│   │   │   │   │       ├── 📄 AuthResponse.java
+│   │   │   │   │       ├── 📄 BookResponse.java
+│   │   │   │   │       ├── 📄 SearchResultResponse.java
+│   │   │   │   │       ├── 📄 AnalyticsResponse.java
+│   │   │   │   │       ├── 📄 IssueResponse.java
+│   │   │   │   │       ├── 📄 FineResponse.java
+│   │   │   │   │       └── 📄 ApiResponse.java # Generic wrapper
+│   │   │   ├── 📁 exception/         # Error Handling
+│   │   │   │   ├── 📄 GlobalExceptionHandler.java
+│   │   │   │   ├── 📄 ResourceNotFoundException.java
+│   │   │   │   ├── 📄 AccessDeniedException.java
+│   │   │   │   ├── 📄 FileValidationException.java
+│   │   │   │   └── 📄 ExternalApiException.java
+│   │   │   └── 📁 util/              # Helpers & Clients
+│   │   │       ├── 📄 FileValidator.java
+│   │   │       ├── 📄 FileStorageUtil.java
+│   │   │       ├── 📄 PdfStreamUtil.java
+│   │   │       ├── 📄 ApiConstants.java
+│   │   │       ├── 📄 OpenLibraryClient.java
+│   │   │       └── 📄 GoogleBooksClient.java
+│   │   └── resources/
+│   │       ├── 📄 application.yml             # Common properties
+│   │       ├── 📄 application-dev.yml         # Local H2/MySQL
+│   │       ├── 📄 application-prod.yml        # Cloud DB & Production logs
+│   │       └── 📁 db/migration/               # Flyway/Liquibase scripts
+│   │           ├── 📄 V1__create_users.sql
+│   │           ├── 📄 V2__create_books.sql
+│   │           ├── 📄 V3__create_issues_fines.sql
+│   │           ├── 📄 V4__create_search_analytics.sql
+│   │           └── 📄 V5__create_audit_logs.sql
+│   └── test/java/com/lms/
+│       ├── 📁 service/
+│       │   ├── 📄 SearchServiceTest.java
+│       │   └── 📄 IssueServiceTest.java
+│       ├── 📁 controller/
+│       │   └── 📄 SearchControllerTest.java    # @WebMvcTest
+│       └── 📁 integration/
+│           └── 📄 AuthIntegrationTest.java    # @SpringBootTest
+===============================================================================================================================================================================================================
+frontend/
+├── 📄 package.json                   # react-router-dom, axios, zustand, tanstack-query
+├── 📄 vite.config.js                 # Proxy config
+├── 📄 tailwind.config.js             # Theme & Plugins
+├── 📄 .env.development               # VITE_API_BASE_URL=http://localhost:8080/api
+├── 📄 .env.production
+├── src/
+│   ├── 📄 main.jsx                   # Providers setup
+│   ├── 📄 App.jsx                    # Router & Route guards
+│   ├── 📄 index.css                  # Tailwind directives
+│   ├── 📁 api/                       # Axios Instances & API calls
+│   │   ├── 📄 axiosInstance.js
+│   │   ├── 📄 bookApi.js
+│   │   └── 📄 authApi.js
+│   ├── 📁 components/                # UI Toolkit (Atomic)
+│   │   ├── 📁 common/                # Basic Components
+│   │   │   ├── 📄 Button.jsx
+│   │   │   ├── 📄 Input.jsx
+│   │   │   ├── 📄 Modal.jsx
+│   │   │   ├── 📄 Table.jsx
+│   │   │   ├── 📄 Spinner.jsx
+│   │   │   ├── 📄 Toast.jsx
+│   │   │   ├── 📄 Badge.jsx
+│   │   │   └── 📄 EmptyState.jsx
+│   │   ├── 📁 layout/                # Page Wrappers
+│   │   │   ├── 📄 Navbar.jsx
+│   │   │   ├── 📄 Sidebar.jsx        # Role-aware logic
+│   │   │   ├── 📄 Footer.jsx
+│   │   │   └── 📄 PageLayout.jsx
+│   │   ├── 📁 books/                 # Book-specific components
+│   │   │   ├── 📄 BookCard.jsx
+│   │   │   ├── 📄 BookGrid.jsx
+│   │   │   ├── 📄 BookSearchBar.jsx
+│   │   │   └── 📄 BookMetaPanel.jsx
+│   │   ├── 📁 lending/               # Issues & Fines
+│   │   │   ├── 📄 IssueRequestButton.jsx
+│   │   │   ├── 📄 IssueStatusBadge.jsx
+│   │   │   └── 📄 IssueConfirmModal.jsx
+│   │   ├── 📁 uploads/               # Faculty tools
+│   │   │   ├── 📄 FileDropzone.jsx
+│   │   │   └── 📄 UploadProgressBar.jsx
+│   │   └── 📁 viewer/                # Resource streaming
+│   │       ├── 📄 PdfViewer.jsx      # react-pdf integration
+│   │       └── 📄 PdfToolbar.jsx
+│   ├── 📁 pages/                     # Routed Views
+│   │   ├── 📁 public/
+│   │   │   ├── 📄 LoginPage.jsx
+│   │   │   ├── 📄 RegisterPage.jsx
+│   │   │   ├── 📄 NotFoundPage.jsx
+│   │   │   └── 📄 UnauthorizedPage.jsx
+│   │   ├── 📁 user/
+│   │   │   ├── 📄 DashboardPage.jsx
+│   │   │   ├── 📄 CatalogPage.jsx
+│   │   │   ├── 📄 BookDetailPage.jsx
+│   │   │   ├── 📄 PdfViewerPage.jsx
+│   │   │   ├── 📄 AnalyticsPage.jsx
+│   │   │   └── 📄 IssueHistoryPage.jsx
+│   │   ├── 📁 faculty/
+│   │   │   ├── 📄 FacultyDashboardPage.jsx
+│   │   │   ├── 📄 UploadResourcePage.jsx
+│   │   │   └── 📄 DeptStatsPage.jsx
+│   │   ├── 📁 librarian/
+│   │   │   ├── 📄 LibrarianDashboardPage.jsx
+│   │   │   ├── 📄 BookEntryPage.jsx
+│   │   │   ├── 📄 PendingIssuesPage.jsx
+│   │   │   ├── 📄 FineManagementPage.jsx
+│   │   │   └── 📄 InventoryLogPage.jsx
+│   │   └── 📁 admin/
+│   │       ├── 📄 AdminDashboardPage.jsx
+│   │       ├── 📄 UserManagementPage.jsx
+│   │       ├── 📄 RoleEscalationPage.jsx
+│   │       ├── 📄 AuditLogPage.jsx
+│   │       └── 📄 DatabaseMaintenancePage.jsx
+│   ├── 📁 hooks/                     # Custom Logic
+│   │   ├── 📄 useAuth.js             # Manage JWT state
+│   │   ├── 📄 useSearch.js           # Debounced API calls
+│   │   ├── 📄 useIssue.js
+│   │   └── 📄 useFine.js
+│   ├── 📁 store/                     # Global State (Zustand)
+│   │   ├── 📄 authStore.js
+│   │   └── 📄 themeStore.js
+│   └── 📁 utils/                     # HOCs & Shared Logic
+│       └── 📄 ProtectedRoute.jsx     # Role-based Guard
